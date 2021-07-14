@@ -1,0 +1,163 @@
+clc
+clear variables
+close all
+
+%delete('test.csv')
+
+load bits_all.mat
+load evm_ts_clean.mat
+n_frames = size(bits_all,2);
+n_rows = 46;
+
+%bits_witout_preamble = bits_all;
+% bits_witout_preamble(:,frame_idx) = [];
+%
+% a = size(bits_witout_preamble);
+%
+% bits_reshape = reshape(bits_witout_preamble, 1, a(1)*a(2));
+load header_workspace.mat
+% i=25759;
+% Header(frame_idx(i):frame_idx(i+1)-1)=NaN;
+if 0
+payload_byte_idx = [7,9,11,18,37,39,67];
+j = 0;
+K = ones(1, length(bits_all))*NaN;
+Header = ones(1, length(bits_all))*NaN;
+
+for i = 1 : length(frame_idx)-1
+    diff = frame_idx(i+1) - frame_idx(i) - 1;
+    if diff > 0
+        j = j+1;
+        % extract bit stream in data frames
+        processed_bits = bits_all(:,frame_idx(i)+1:frame_idx(i+1)-1);
+        bits_reshape = processed_bits(:).';%reshape(processed_bits, 1, diff*n_rows);
+        string_bits = binaryVectorToHex(bits_reshape,'LSBFirst');
+        if  mod(length(string_bits),2) ~= 0
+            string_bits = strcat('0',string_bits);
+        end
+        cell_str = flip(cellstr(reshape(string_bits,2,[])'));
+        % Compare message header
+        if strcmp(cell2mat(cell_str([1,2,3,4])),['00';'84';'00';'84'])
+        %if strcmp(cell_str(1), '00') & strcmp(cell_str(2), '84') & strcmp(cell_str(3), '00') & strcmp(cell_str(4), '84')
+            payload = mode(cell2mat(cell_str([7,9,11,18,37,39,67])));
+            K(frame_idx(i):frame_idx(i+1)-1) = hex2dec(payload);
+            H1 = hex2dec(cell_str(5));
+            H2 = hex2dec(cell_str(6));
+            head_cnt_bits = bits_reshape(33:33+15);
+            head_cnt_bits(15:16) = not(head_cnt_bits(15:16));
+            Ha = hex2dec(binaryVectorToHex(head_cnt_bits([9:16,1:8]),'LSBFirst'));
+            Header(frame_idx(i):frame_idx(i+1)-1) = Ha;
+%             if strcmp(cell_str(7), cell_str(9)) & strcmp(cell_str(7), cell_str(11)) & strcmp(cell_str(7), cell_str(18)) & strcmp(cell_str(7), cell_str(37)) & strcmp(cell_str(7), cell_str(39)) & strcmp(cell_str(7), cell_str(67))
+%                 N(j) = hex2dec(payload);
+%                 K(frame_idx(i):frame_idx(i+1)-1) = N(j);
+%                 M(j) =  hex2dec(cell_str(5));
+%             else
+%                 N(j) = NaN;
+%                 M(j) = hex2dec( cell_str(6));
+%             end
+%         else
+%             N(j) = NaN;
+%             M(j) = NaN;
+        end
+%     else
+%         K(frame_idx(i)) = -1;
+    end
+    %end
+end
+end
+
+figure
+subplot(2,1,1);
+plot(K)
+%plot(N)
+
+subplot(2,1,2);
+plot(Header)
+%plot(M)
+
+% figure
+% plot(K)
+
+%% fill the blanks based on header
+% find from the end to beginning
+if 0
+i = length(frame_idx)-1;
+crt_pld = Header(frame_idx(i));
+header_full = Header(frame_idx(i):frame_idx(i+1)-1);
+used_frame_idx = [frame_idx(i+1)];
+flag_vec = [1,zeros(1,24)];
+flag_full = flag_vec;
+while (i > 0)
+    current = Header(frame_idx(i));
+    if isnan(current)
+        header_full = [NaN,header_full];
+        flag_full = [0,flag_full];
+        %used_frame_idx = [frame_idx(i),used_frame_idx];
+    elseif current == crt_pld+1
+        header_full = [Header(frame_idx(i)).*ones(1,25), header_full];
+        flag_full = [flag_vec,flag_full];
+        crt_pld = current;
+        used_frame_idx = [frame_idx(i),used_frame_idx];
+    elseif current > crt_pld+1
+        diff = current - crt_pld -1;
+        header_full = [Header(frame_idx(i)).*ones(1,25), ones(1,diff.*25).*NaN, header_full];
+        flag_full = [flag_vec,zeros(1,diff.*25),flag_full];
+        crt_pld = current;
+        used_frame_idx = [frame_idx(i),used_frame_idx];
+%     elseif current < crt_pld
+%         header_full = [Header(frame_idx(i)).*ones(1,25), header_full];
+%         crt_pld = crt_pld + 1;
+    end
+    i = i-1;
+end
+save header_full.mat header_full used_frame_idx flag_full
+else
+    load header_full.mat
+end
+figure;
+header_index = 1:length(header_full);
+Ts = 0.000002;
+symbol_time = (128+64).*Ts;
+unprocessed_time = symbol_time.*(n_frames - frame_idx(end));
+header_time = header_index.*symbol_time;
+plot(header_time,header_full);
+%% add crash time and highlight missing gaps
+UTC_of_start = 'October 31, 2016 15:04:19.728'; % starting time of reception
+UTC_of_stop = 'October 31, 2016 15:11:39.631'; % ending time of reception
+UTC_of_crash = 'October 31, 2016 15:10:20.631'; % ending time of reception
+start_time = datevec(UTC_of_start,'mmmm dd, yyyy HH:MM:SS.FFF');
+stop_time = datevec(UTC_of_stop,'mmmm dd, yyyy HH:MM:SS.FFF');
+crash_time = datevec(UTC_of_crash,'mmmm dd, yyyy HH:MM:SS.FFF');
+crash_sec = header_time(end) + unprocessed_time - get_num_of_secs(crash_time,stop_time);
+car_start_sec = header_time(end) + unprocessed_time - 91;
+car_stop_sec = crash_sec + 8;
+hold on;
+% mark missing data
+header_empty = isnan(header_full);
+header_miss=NaN.*ones(size(header_full));
+header_miss(header_empty==1)=mean([nanmin(Header),nanmax(Header)]);
+plot(header_time,header_miss,'-green','LineWidth',10);
+% mark crash time
+plot(car_start_sec.*[1,1],[nanmin(Header),nanmax(Header)],':b','LineWidth',2);
+plot(crash_sec.*[1,1],[nanmin(Header),nanmax(Header)],'-r','LineWidth',2);
+plot(car_stop_sec.*[1,1],[nanmin(Header),nanmax(Header)],':r','LineWidth',2);
+hold off;
+legend({'Message Header','Missing Data','Car Start Time','Crash Time','Car Stop Time'});
+xlabel('Time (s)');
+ylabel('Header Value');
+ylim([nanmin(Header),nanmax(Header)+500]);
+
+%% Generate the clean data
+load rx_ofdm_iq.mat
+rx_ofdm_iq_clean = NaN.*ones(64,size(header_full,2));
+flag_idx = find(flag_full==1);
+for i = 1:length(used_frame_idx)
+    fidx = used_frame_idx(i);
+    [~,loc] = find(fidx,frame_idx);
+    fidx_end = frame_idx(loc+1)-1;
+    len_dat = fidx_end-fidx + 1;
+    rx_ofdm_iq_clean(:,flag_idx(i):flag_idx(idx)+len_dat) = rx_odfm_iq(:,fidx:fidx_end);
+end
+
+rx_ofdm_iq = rx_ofdm_iq_clean;
+save rx_ofdm_iq_clean.mat rx_ofdm_iq

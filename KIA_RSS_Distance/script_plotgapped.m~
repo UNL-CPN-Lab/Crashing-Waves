@@ -1,0 +1,283 @@
+%% Post processing
+% SNR, EVM, PE
+clear all;
+close all;
+% load rx_ofdm_iq.mat
+load evm_ts_gapped.mat
+load pe_ts_gapped.mat
+load sinr_ts_gapped.mat
+%load rx_ofdm_iq_f1.mat
+load channel_estimate_gapped.mat
+load channel_est_all_gapped.mat
+load header_full.mat
+dat_loc = [9:31,34:56];
+
+% eq_ofdm_iq_f1 = rx_ofdm_iq_f1(dat_loc,:)./channel_estimate(dat_loc,:);
+% eq_ofdm_bit_f1 = zeros(size(eq_ofdm_iq_f1));
+% eq_ofdm_bit_f1(real(eq_ofdm_iq_f1)<0)=1;
+% %eq_ofdm_bit_f1 = eq_ofdm_bit_f1(pe1_idx);
+% [lia,locb] = ismember(pe1_idx-1,frame_idx);
+% eq_ofdm_bit_f1=eq_ofdm_bit_f1(:,locb(lia));
+% bits_idx = frame_idx(locb(lia));
+%%
+UTC_of_start = 'October 31, 2016 15:04:19.728'; % starting time of reception
+UTC_of_stop = 'October 31, 2016 15:11:39.631'; % ending time of reception
+
+UTC_of_crash = 'October 31, 2016 15:10:20.631'; % ending time of reception
+Ts = 0.000002;
+symbol_time = (128+64).*Ts;
+start_time = datevec(UTC_of_start,'mmmm dd, yyyy HH:MM:SS.FFF');
+stop_time = datevec(UTC_of_stop,'mmmm dd, yyyy HH:MM:SS.FFF');
+crash_time = datevec(UTC_of_crash,'mmmm dd, yyyy HH:MM:SS.FFF');
+
+header_index = 1:length(header_full);
+header_time = header_index.*symbol_time;
+unprocessed_time = symbol_time.*(len_frames - frame_idx(end));
+
+crash_sec = header_time(end) + unprocessed_time - get_num_of_secs(crash_time,stop_time);
+car_start_sec = header_time(end) + unprocessed_time - 91;
+car_stop_sec = crash_sec + 8;
+%% Add Missing Gaps
+
+header_empty = isnan(header_full);
+nan_loc = find(header_empty==1);
+val_loc = find(header_empty==0);
+header_miss=NaN.*ones(size(header_full));
+header_miss(header_empty==1)=1;%mean([nanmin(header_full),nanmax(header_full)]);
+
+% [lia,locb] = ismember(used_frame_idx,frame_idx);
+% evm1_ts_gap = evm1_ts(locb(lia));
+
+preamble_time = header_time(frame_idx);
+frames_time = header_time([1:len_frames]);
+%% Ploting
+%chest_occupied = channel_estimate([9:55],:);
+% time window for statistics
+
+
+figure;
+plot(frames_time,evm1_ts);
+hold on;
+plot(frames_time,evm2_ts);
+plot(car_start_sec.*[1,1],[0,120],':b','LineWidth',2);
+plot(crash_sec.*[1,1],[0,120],'-r','LineWidth',2);
+plot(car_stop_sec.*[1,1],[0,120],':r','LineWidth',2);
+plot(header_time,10.*header_miss,'-green','LineWidth',10);
+hold off;
+xlabel('Time (s)');
+ylabel('EVM (%)');
+legend('EVM 1','EVM Kmean');
+grid on;
+grid minor;
+legend({'EVM 1','EVM Kmean','Vehicle Start','Crash Time','Vehicle Stop','Missing Data'});
+xlim([0,250]);
+ylim([0,120]);
+
+%%
+figure;
+yyaxis right
+line1 = plot(frames_time,unwrap(pe_p_ts),':+');
+ylabel('Phase Error (rad)');
+yyaxis left
+line2 = plot(frames_time,unwrap(pe_d_ts),':.');
+hold on;
+line3 = plot(car_start_sec.*[1,1],[-1.5,1.8],':b','LineWidth',2);
+line4 = plot(crash_sec.*[1,1],[-1.5,1.5],'-r','LineWidth',2);
+line5 = plot(car_stop_sec.*[1,1],[-1.5,1.5],':r','LineWidth',2);
+line6 = plot(header_time,0.*header_miss,'-green','LineWidth',10);
+hold off;
+ylim([-1.5,1.5]);
+xlabel('Time (s)');
+ylabel('Phase Error (rad)');
+grid on;
+legend([line1,line2,line3,line4,line5,line6],{'Accumulated Phase Error','Phase Error After Correction','Vehicle Start','Crash Time','Vehicle Stop','Missing Data'});
+
+%%
+
+figure;
+plot(preamble_time,sinr,':o');
+hold on;
+plot(car_start_sec.*[1,1],[0,25],':b','LineWidth',2);
+plot(crash_sec.*[1,1],[0,25],'-r','LineWidth',2);
+plot(car_stop_sec.*[1,1],[0,25],':r','LineWidth',2);
+plot(header_time,10.*header_miss,'-green','LineWidth',10);
+hold off;
+xlabel('Time (s)');
+ylabel('SNR (dB)');
+grid on;
+legend({'SNR','Vehicle Start','Crash Time','Vehicle Stop','Missing Data'});
+xlim([0,250]);
+
+
+%% 150-163, 165-175, 175-183, 185-195
+timeslots = {[140,160],[169,175],[175.5,182],[185,205]};
+legendtext = {'Before Crash Stationary','Before Crash Moving','During Crash','After Crash Stationary'};
+h1 = figure;
+h2 = figure;
+h3 = figure;
+h4 = figure;
+markers = {'*','+','^','o'};
+pe_p_vec = NaN.*ones(4,24);
+evm_k_vec = NaN.*ones(4,24);
+coherence_vec = NaN.*ones(4,24);
+std_vec = NaN.*ones(4,24);
+unwraped_pe_p = unwrap(pe_p_ts);
+for i=1:length(timeslots)
+    slots = timeslots{i};
+    %% CDFs
+    [~,start_idx] = min(abs(frames_time-slots(1)));
+    [~,end_idx] = min(abs(frames_time-slots(2)));
+    figure(h1);
+    hold on;
+    h=cdfplot(abs(pe_d_ts(start_idx:end_idx)));
+    set(h,'LineWidth',1.5);
+    figure(h2);
+    hold on;
+    h=cdfplot(evm1_ts(start_idx:end_idx));
+    set(h,'LineWidth',1.5);
+    figure(h3);
+    hold on;
+    h=cdfplot(evm2_ts(start_idx:end_idx));
+    set(h,'LineWidth',1.5);
+    
+    [~,start_idx] = min(abs(preamble_time-slots(1)));
+    [~,end_idx] = min(abs(preamble_time-slots(2)));
+    figure(h4);
+    hold on;
+    h=cdfplot(sinr(start_idx:end_idx));
+    set(h,'LineWidth',1.5);
+    %% Channel Coherence
+    preambles = frame_idx(start_idx:end_idx);
+    for j = 1:24
+        pe_p_vec(i,j) = nanmean(abs(unwraped_pe_p(preambles+j)-unwraped_pe_p(preambles+1))+abs(pe_d_ts(preambles+1)));
+        evm_k_vec(i,j) = nanmean(evm2_ts(preambles+j));
+        ch_preambles = channel_est_all([1:23,25:47],preambles);
+        ch_data = channel_est_all([1:23,25:47],preambles+j);
+        coef_vec = [];
+        for fn = 1:size(ch_data,2)
+            coef_vec(fn) = corr(ch_preambles(:,fn),ch_data(:,fn));
+        end
+        coherence_vec(i,j) = nanmean(coef_vec);
+        std_vec(i,j) = nanstd(abs(coef_vec));
+    end
+end
+figure(h1);
+hold off;
+legend(legendtext,'Location','best');
+title([]);
+xlim([0,0.8]);
+xlabel('(Rad)');
+set(findall(gcf,'-property','FontSize'),'FontSize',16);
+figure(h2);
+hold off;
+legend(legendtext,'Location','best');
+title([]);
+xlim([0,80]);
+xlabel('(%)');
+set(findall(gcf,'-property','FontSize'),'FontSize',16);
+figure(h3);
+hold off;
+legend(legendtext,'Location','best');
+title([]);
+xlim([12,22]);
+xlabel('(%)');
+set(findall(gcf,'-property','FontSize'),'FontSize',16);
+figure(h4);
+hold off;
+legend(legendtext,'Location','best');
+title([]);
+xlim([15,23]);
+xlabel('(dB)');
+set(findall(gcf,'-property','FontSize'),'FontSize',16);
+
+
+figure;
+%hlines = plot(pe_p_vec.','-*');
+hlines = plot([1:24].*symbol_time.*1000,pe_p_vec.','-*');
+for i = 1:length(hlines)
+    hlines(i).Marker = markers{i};
+    hlines(i).MarkerSize = 10;
+end
+legend(legendtext,'Location','best');
+xlabel('Number of OFDM Symbols');
+xlabel('Time Offset (ms)');
+ylabel('Phase Drift (Rad)');
+set(findall(gcf,'-property','FontSize'),'FontSize',16);
+grid on;
+grid minor;
+figure;
+%hlines = plot(evm_k_vec.','-^');
+hlines = plot([1:24].*symbol_time.*1000,evm_k_vec.','-*');
+for i = 1:length(hlines)
+    hlines(i).Marker = markers{i};
+    hlines(i).MarkerSize = 10;
+end
+xlabel('Number of OFDM Symbols');
+ylabel('EVM (%)');
+legend(legendtext,'Location','best');
+set(findall(gcf,'-property','FontSize'),'FontSize',16);
+grid on;
+grid minor;
+figure;
+%hlines = plot(abs(coherence_vec).','-+');
+hlines = plot([1:24].*symbol_time.*1000,coherence_vec.','-*');
+for i = 1:length(hlines)
+    hlines(i).Marker = markers{i};
+    hlines(i).MarkerSize = 10;
+end
+legend(legendtext,'Location','best');
+set(findall(gcf,'-property','FontSize'),'FontSize',16);
+xlabel('Number of OFDM Symbols');
+ylabel('Correlation Coefficient');
+grid on;
+grid minor;
+figure;
+%hlines = plot(std_vec.','-o');
+hlines = plot([1:24].*symbol_time.*1000,std_vec.','-*');
+for i = 1:length(hlines)
+    hlines(i).Marker = markers{i};
+    hlines(i).MarkerSize = 10;
+end
+legend(legendtext,'Location','best');
+set(findall(gcf,'-property','FontSize'),'FontSize',16);
+xlabel('Number of OFDM Symbols');
+ylabel('Std');
+grid on;
+grid minor;
+% figure;
+% plot(mean(eq_ofdm_bit_f1,2),':o');
+% 
+% errbit = sum(abs(eq_ofdm_bit_f1([1:32,40],:)-eq_ofdm_bit_f1([1:32,40],1)),1);
+% figure;
+% plot(bits_time,errbit,':*');
+% hold on;
+% plot([num_of_sec_crash,num_of_sec_crash],[0,25],'r','LineWidth',2);
+% hold off;
+% xlabel('Time (s)');
+% ylabel('Error Bits');
+% grid on;
+% 
+% [x,y]=meshgrid(bits_time,[1:46]);
+% figure;
+% surf(x,y,eq_ofdm_bit_f1,'EdgeColor','None');
+% ylim([0,47]);
+% view(2);
+%%
+%meshgrid()
+[x,y]=meshgrid(frames_time,[1:47]);
+figure;
+surf(x,y,20.*log10(abs(channel_est_all)),'EdgeColor','None');
+hold on;
+plot3(crash_sec.*ones(1,6),[0,10,20,30,40,50],[-10,-70,-10,-70,-10,-70],'r','LineWidth',2);
+hold off;
+xlabel('time (s)');ylabel('Subcarrier');zlabel('Channel Gain');
+xlim([160,190]);
+
+figure;
+surf(x,y,unwrap(angle(channel_est_all),[],1),'EdgeColor','None');
+hold on;
+plot3(crash_sec.*ones(1,6),[0,10,20,30,40,50],[70,-70,70,-70,70,-70],'r','LineWidth',2);
+hold off;
+xlabel('time (s)');ylabel('Subcarrier');zlabel('Channel Phase (rad)');
+xlim([160,190]);
+

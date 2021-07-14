@@ -1,0 +1,10 @@
+# Data files
+*.dat
+*.mat
+
+#Image files
+*.png
+*.eps
+*.fig
+
+
